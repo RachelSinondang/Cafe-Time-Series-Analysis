@@ -1,0 +1,349 @@
+---
+title: "Time Series Cafe Analysis"
+author: "Rachel Sinondang"
+date: "8/9/2021"
+output: html_document
+---
+
+## Business Case
+
+Pada project kali ini, saya akan mengolah data yang berisi data pembelian item di sebuah cafe. Melalui data ini saya hendak mengambil insight seperti kapan waktu terbanyak terjadinya penjualan suatu item, item apa yang paling banyak terjual, total penjualan tiap item per minggunya, dan total penjualan cafe setiap harinya. Selain itu saya juga hendak memprediksi kira-kira berapa total penjualan tiap harinya di hari-hari depan menggunakan machine learning Time-Series Analysis  
+
+## Data Wrangling
+
+### Memanggil Library
+```{r setup, include=FALSE}
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+library(treemap)
+library(plotly)
+```
+
+```{r setup, include=FALSE}
+# inisialisasi tema background plot
+theme_algoritma <- theme(legend.key = element_rect(fill="black"),
+           legend.background = element_rect(color="white", fill="#263238"),
+           plot.subtitle = element_text(size=6, color="white"),
+           panel.background = element_rect(fill="#dddddd"),
+           panel.border = element_rect(fill=NA),
+           panel.grid.minor.x = element_blank(),
+           panel.grid.major.x = element_blank(),
+           panel.grid.major.y = element_line(color="darkgrey", linetype=2),
+           panel.grid.minor.y = element_blank(),
+           plot.background = element_rect(fill="#263238"),
+           text = element_text(color="white"),
+           axis.text = element_text(color="white")
+           
+           )
+```
+
+### Membaca data
+```{r setup, include=FALSE}
+bread <- read.csv("bread_basket.csv")
+```
+
+Data terdiri dari:  
+Transaction: nomor transaksi  
+Item: Jenis item yang terjual  
+date_time: Waktu terjadinya penjualan  
+weekday_weekend: Apakah penjualan terjadi di hari biasa atau weekend    
+period_day: Apakah penjualan terjadi di pagi/siang/sore  
+
+### Data Cleasing
+```{r setup, include=FALSE}
+# mengubah tipe data menjadi tipe data yang sesuai
+bread <- bread %>%
+  mutate(Item = as.factor(Item),
+         date_time = dmy_hm(date_time),
+         period_day = as.factor(period_day),
+         weekday_weekend = as.factor(weekday_weekend))
+```
+
+```{r setup, include=FALSE}
+# mengecek apakah terdapat nilai kosong
+colSums(is.na(bread))
+```
+
+```{r setup, include=FALSE}
+# manipulasi data
+bread$hour_time <- floor_date(bread$date_time, "hour") # mengambil jam saat item terjual
+bread$date <- date(bread$date_time) # tanggal terjadinya penjualan
+```
+
+### Insight dan visualisasi data
+
+Insight pertama yang ingin saya lihat adalah pada waktu kapankah (pagi/siang/sore, weekend/weekday) terjadinya penjualan item terbanyak. Analisa ini dapat untuk memperkirakan berapa banyak stock bahan makanan yang harus dibeli, kapan waktu terbaik menyiapkan makanan seperti roti/pastry dan berapa jumlahnya  
+
+```{r setup, include=FALSE}
+# total terjualnya masing-masing item menurut tanggal
+bred <- bread %>% 
+  group_by(Item, date,period_day, weekday_weekend) %>% 
+  summarise(total = n())
+
+# rata-rata penjualan menurut weekend/weekday, morning/afternoon/evening
+rerata_sold <- bred %>%
+  group_by(Item,period_day, weekday_weekend) %>%
+  summarise(mean = mean(total),
+            mean = round(mean))
+```
+
+
+```{r setup, include=FALSE}
+# Visualisasi di mana sebagai contoh agar grafik lebih jelas maka saya hanya mengambil 4 items saja
+library(glue)
+period_plot <- ggplot(rerata_sold %>% filter(Item== "Bread" | Item == "Coffee" | Item == "Pastry"), aes(x=weekday_weekend, y=mean, fill=period_day, text = glue("{period_day}
+                                                                                                                                                             rerata: {mean}"))) + geom_col() + facet_grid(.~Item) + theme_algoritma +
+  labs(title = NULL,
+       x = NULL,
+       y = "Total Items") 
+
+ggplotly(period_plot, tooltip = "text") %>% layout(showlegend = FALSE)
+```
+> Contoh insight: Penjualan roti memiliki rerata penjualan paling sedikit di waktu sore-malam sehingga untuk roti shift malam tidak perlu dibuat sebanyak roti pagi dan siang  
+
+Insight kedua adalah melihat total penjualan suatu items per minggunya. hal ini dapat untuk pertimbangan belanja mingguan sebagai persiapan pembuatan items
+```{r setup, include=FALSE}
+# total penjualan masing-masing item
+bread_1 <- bread  %>%
+  group_by(Item, period_day, weekday_weekend) %>%
+  summarise(total = n())
+
+# total penjualan berdasarkan item dan tanggal penjualan
+total <- bread %>%
+  group_by(date,Item) %>%
+  summarise(total = n())
+
+# total penjualan masing-masing Item per minggu
+t_week <- cut(total$date, "week")
+t_weekly <- aggregate(total ~ t_week+Item, total, mean)
+
+# menambahkan kolom bulan ke tabel untuk visualisasi
+weekly <- t_weekly %>% mutate(t_week = as.Date(t_week),
+                              total = round(total),
+                              month = month(t_week))
+```
+
+```{r setup, include=FALSE}
+library(viridis)
+heat_map <- ggplot(weekly %>%  filter(Item== "Bread" | Item == "Coffee" | Item == "Pastry" | Item == "Cake" | Item == "Tea" | Item == "Sandwich"), aes(t_week, Item, fill= total, text = glue("month: {month}
+                                                                                                                                                                                              total: {total}"))) + 
+  geom_tile()+
+  scale_fill_viridis(discrete=FALSE)+theme_algoritma+
+  labs(title = NULL,
+       x = NULL,
+       y = "Item") 
+
+ggplotly(heat_map, tooltip = "text")
+```
+> Contoh Insight: Total penjualan roti tiap minggunya adalah sekitar 17-29 buah sehingga bahan untuk roti yang harus dipersiapkan per minggunya adalah sekitar 20-30 roti
+
+```{r setup, include=FALSE}
+# library("lattice")
+# levelplot(total ~ t_week*Item, data= weekly %>%  filter(Item== "Bread" | Item == "Coffee" | Item == "Pastry" | Item == "Cake" | Item == "Tea" | Item == "Sandwich")  ,xlab="X",
+#           main="",
+#            col.regions=heat.colors(100))
+```
+
+Insight ketiga yang ingin dilihat adalah rerata penjualan Items per bulannya
+```{r setup, include=FALSE}
+# Total penjualan items setiap bulan
+month <- cut(total$date, "month")
+monthly <- aggregate(total ~ month+Item, total, sum)
+
+# Rerata penjualan items bulanan
+monthly_mean <- monthly %>%
+  group_by(Item) %>%
+  summarise(rerata = mean(total)) %>%
+  arrange(desc(rerata)) %>%
+  mutate(rerata = round(rerata))
+```
+
+```{r setup, include=FALSE}
+library(treemapify)
+ggplot(monthly_mean, aes(area = rerata, fill = rerata,
+               label = paste(Item, rerata, sep = "\n"))) +
+  geom_treemap(show.legend = F) +
+  geom_treemap_text(colour = "white",
+                    place = "centre",
+                    size = 15)
+```
+> Contoh insight: Rerata penjualan terbanyak perbulannya adalah roti dan juga coffee. Items dengan penjualan terbanyak dapat dilakukan uji coba varian baru. Sedangkan items dengan penjualan paling sedikit dapat dilihat perlu dicari tau apakah yang menyebabkan kurangnya penjualan apakah kurang marketing atau memang tidak sesuai dengan taste pelanggan
+
+```{r setup, include=FALSE}
+# treemap rerata pembelian per bulan menurut item
+
+# treemap(monthly_mean,
+#             index="Item",
+#             vSize="rerata",
+#             type="index"
+#             )
+```
+
+
+## Prediksi penjualan harian menggunakan time series analysis
+
+```{r setup, include=FALSE}
+# memanggil library untuk time series analysis
+
+library(forecast) # time series library
+library(TTR) # for Simple moving average function
+library(MLmetrics) # calculate error
+library(tseries) # adf.test
+library(fpp) # usconsumtion
+```
+
+```{r setup, include=FALSE}
+# total penjualan items setiap harinya
+daily <- bread %>% 
+  group_by(date) %>%
+  summarise(total = n()) 
+```
+
+Karena untuk time series analysis waktu tidak boleh ada yang kosong dan harus berurutan maka kita lakukan pad untuk mengisi adanya waktu yang kosong
+```{r setup, include=FALSE}
+library(padr)
+daily <- daily %>% 
+  pad()
+```
+
+Setelah dilakukan pad terdapat data 3 data kosong sehingga perlu diisi sebab pada time series analysis, tanggal harus berurutan dan tidak memiliki data kosong
+```{r setup, include=FALSE}
+library(zoo)
+daily <- daily %>% 
+  mutate(total = na.fill(total, fill = "extend"))
+```
+
+```{r setup, include=FALSE}
+# hari dari tanggal dan membulatkan total penjualan
+daily_1 <- daily %>%
+  mutate(wday = wday(date),
+         total = round(total))
+```
+
+### Visualisasi penjualan per harinya
+```{r setup, include=FALSE}
+ggplot(data = daily_1, aes(x = date, y = total))+
+  geom_point( col = "blue")+
+  geom_point( data = daily_1 %>% 
+                      filter(wday == "1"), col = "red")+
+  geom_line() + theme_algoritma +
+  labs(title = "Total of Sales in a day",
+       x = "Date",
+       y = "Total Items") 
+
+```
+Untuk mengetahui hari dengan penjualan tertinggi maka saya menandakan hari minggu dnegan titik merah.Dari hasil visualisasi, hampir semua penjualan tertinggi per minggu adalah di hari Sabtu kecuali minggu-4 Desember
+
+### Membuat time series
+```{r setup, include=FALSE}
+# time series
+bread_ts <- ts(data = daily$total,
+             start = ymd("2016-10-30"),
+             frequency = 7)
+
+# plotting
+bread_ts %>%
+  decompose() %>% 
+   autoplot()
+```
+Dari autoplot terlihat ada seasonal namun trend kurang smooth di mana kemungkinan masih ada seasonal lain. Oleh sebab itu saya akan membuat time series di mana ada multiseasonal dengan menggunakan msts. Saya mengambil multiseasonal mingguan dan bulanan
+```{r setup, include=FALSE}
+daily$total %>% 
+  msts(seasonal.periods = c(7,4*7),start = ymd("2016-10-30")) %>% # multiseasonal ts (daily,weekly)
+  mstl() %>% # multiseasonal ts decomposition
+  autoplot() 
+```
+Dari hasil autoplot terlihat trend sudah smooth dan salah satu seasonal bersifat multiplikatif
+```{r setup, include=FALSE}
+# assign final ts object
+bread_msts <- daily$total %>% 
+  msts(seasonal.periods = c(7,4*7),start = ymd("2016-10-30"))
+
+```
+
+Cek stationary data
+```{r setup, include=FALSE}
+# check for stationary
+adf.test(bread_msts)
+```
+Dengan alfa < 0.05 berarti msts sudah stasioner
+
+### Membuat machine learning time series analysis
+```{r setup, include=FALSE}
+# memisahkan data train dan data test
+bread_train <- bread_msts %>% head(length(bread_msts) - 2*4*7)
+bread_test <- bread_msts %>% tail(2*4*7)
+```
+
+Saya akan membuat tiga macam machine learning yaitu ets, arima, dan Holt Winters di mana nanti akan diuji machine learning mana yang menghasilkan error paling rendah
+```{r setup, include=FALSE}
+# ets
+bread_ets <- stlm(bread_train, method = "ets",allow.multiplicative.trend = T) 
+
+# SARIMA
+bread_arima <- stlm(bread_train, method = "arima", allow.multiplicative.trend = T)
+
+# Holt-Winters
+model_holtwin <- HoltWinters(x = bread_train, seasonal = "multiplicative")
+```
+
+### Forecasting
+```{r setup, include=FALSE}
+# forecasting model ets
+ets_f <- forecast(bread_ets, h = 2*4*7, allow.multiplicative.trend = T)
+
+# forecasting model arima
+arima_f <- forecast(bread_arima, h = 2*4*7, allow.multiplicative.trend = T)
+
+# forecasting model holtwinters
+holtwin_f <- forecast(model_holtwin, h = 2*4*7)
+```
+
+### Evaluasi error
+```{r setup, include=FALSE}
+data.frame(ETS = MAE(ets_f$mean, bread_test), 
+           ARIMA = MAE(arima_f$mean, bread_test),
+           Holtwins = MAE(holtwin_f$mean, bread_test))
+```
+
+Dari hasil evaluasi error didapatkan model ARIMA memiliki error terendah yaitu 18.97964
+```{r setup, include=FALSE}
+bread_train %>% tail(4*7) %>% 
+  autoplot()+
+  autolayer(bread_test, series = "test")+
+  autolayer(bread_arima$fitted %>% tail(4*7), series = "fitted_arima")+
+  autolayer(arima_f$mean, series = "forecast_arima")
+```
+
+### Uji asumsi
+
+Terakhir, kita akan melakukan uji asumsi. Uji asumsi pada time series adalah untuk mengukur apakah residual yang diperoleh dari modeling sudah cukup baik untuk menggambarkan dan menangkap informasi pada data. Berikut adalah uji asumsi yang akan dilakukan:
+1. Residual yang tidak berkorelasi. Apabila terdapat residual yang berkorelasi, artinya masih terdapat informasi yang tertinggal yang seharusnya digunakan untuk menghitung hasil forecast.
+2. Residual memiliki rata-rata 0.
+
+### No-autocorrelation residual
+yang diinginkan p-value > 0.05 (alpha), no-autocorrelation
+```{r setup, include=FALSE}
+# menggunakan Ljung-Box test
+Box.test(bread_arima$residuals, type = "Ljung-Box")
+```
+p-value = 0.9387
+
+Karena nilai pvalue > alpha, artinya residual tidak ada autokorelasi
+
+### Normality residual
+**yang diinginkan p-value > 0.05 (alpha), residual menyebar normal**
+
+### dengan plotting
+```{r setup, include=FALSE}
+hist(bread_arima$residuals)
+```
+
+### saphiro test
+```{r setup, include=FALSE}
+shapiro.test(bread_arima$residuals)
+```
+p-value > 0.05 mengindikasikan bahwa residual menyebar normal
+
+
